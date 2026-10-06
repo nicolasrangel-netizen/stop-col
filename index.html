@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Stop Col</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#f3f7f5;color:#172033;font-family:system-ui,Arial}.app{max-width:720px;margin:auto;padding:20px;min-height:100vh}
+header{display:flex;justify-content:space-between;align-items:center;margin-bottom:18px}.logo{font-size:31px;font-weight:900}.logo b{color:#15965a}.tag{background:#e3f5eb;color:#137d4a;padding:7px 10px;border-radius:99px;font-weight:800;font-size:12px}
+.card{background:#fff;border-radius:22px;padding:22px;margin:14px 0;box-shadow:0 8px 30px #17203312}h1{margin:0 0 7px;font-size:28px}h2{margin:0 0 12px}p{color:#667085;line-height:1.45}input{width:100%;padding:14px;border:1px solid #d9dee7;border-radius:12px;margin:6px 0 12px;font-size:16px}button{width:100%;border:0;border-radius:12px;padding:14px;margin-top:8px;background:#15965a;color:#fff;font-weight:900;font-size:16px}button.alt{background:#edf1f4;color:#172033}.row{display:grid;grid-template-columns:1fr 1fr;gap:10px}.players{display:grid;grid-template-columns:1fr 1fr;gap:9px}.player{background:#f5f7f9;padding:11px;border-radius:12px}.code{font-size:40px;text-align:center;font-weight:950;letter-spacing:8px;color:#15965a}.letter{text-align:center;font-size:76px;font-weight:950;color:#15965a}.timer{text-align:center;font-size:23px;font-weight:900}.grid{display:grid;grid-template-columns:1fr 1fr;gap:9px}.grid label{font-size:12px;font-weight:800}.hidden{display:none}.result{padding:12px 0;border-bottom:1px solid #eee}.score{text-align:center;font-size:30px;font-weight:950;margin:12px}.err{color:#b42318;font-weight:700}.ok{color:#137d4a;font-weight:700}
+</style>
+</head>
+<body><div class="app">
+<header><div class="logo">STOP <b>COL</b> 🇨🇴</div><div class="tag">MULTIJUGADOR</div></header>
+
+<section id="home" class="card">
+<h1>El Stop de los colombianos</h1><p>Jugá con tu familia o amigos desde celulares diferentes.</p>
+<input id="name" placeholder="Tu nombre">
+<div class="row"><button onclick="create()">Crear sala</button><button class="alt" onclick="join()">Unirme</button></div>
+<div id="msg"></div>
+</section>
+
+<section id="lobby" class="card hidden">
+<h2>Sala <span id="roomCode"></span></h2><div class="code" id="bigCode"></div>
+<p>Compartí este código. Pueden entrar entre 2 y 6 jugadores.</p>
+<div class="players" id="players"></div>
+<button id="startBtn" onclick="start()">Empezar partida</button>
+</section>
+
+<section id="game" class="card hidden">
+<div class="letter" id="letter">A</div><div class="timer" id="timer">60</div>
+<p>Completá todas las categorías. Cuando alguien pulse STOP, se cierra la ronda.</p>
+<div class="grid" id="fields"></div>
+<button onclick="stop()">🛑 ¡STOP!</button><button class="alt" onclick="submit()">Entregar respuestas</button>
+<div id="progress"></div>
+</section>
+
+<section id="results" class="card hidden">
+<h2>Resultados</h2><div id="resultsList"></div>
+<button id="nextBtn" onclick="nextRound()">Siguiente ronda</button>
+</section>
+</div>
+<script src="/socket.io/socket.io.js"></script>
+<script>
+const socket=io(); let room="",isHost=false,categories=[];
+const $=id=>document.getElementById(id);
+function show(id){["home","lobby","game","results"].forEach(x=>$(x).classList.toggle("hidden",x!==id))}
+function name(){return $("name").value.trim()||"Jugador"}
+function msg(t,c=""){ $("msg").className=c; $("msg").textContent=t }
+function create(){socket.emit("room:create",{name:name()},r=>{if(!r.ok)return msg(r.error,"err");room=r.code;isHost=true;enterLobby()})}
+function join(){const c=prompt("Código de sala:");if(!c)return;socket.emit("room:join",{code:c,name:name()},r=>{if(!r.ok)return msg(r.error,"err");room=r.code;isHost=false;enterLobby()})}
+function enterLobby(){show("lobby");$("roomCode").textContent=room;$("bigCode").textContent=room}
+socket.on("room:update",r=>{if(r.code!==room)return;isHost=r.hostId===socket.id;$("players").innerHTML=r.players.map(p=>`<div class="player">👤 ${p.name}${p.id===r.hostId?" ⭐":""}<br><small>${p.score} pts</small></div>`).join("");$("startBtn").disabled=!isHost||r.players.length<2;$("startBtn").textContent=r.players.length<2?"Esperando 2 jugadores…":"Empezar partida";});
+function start(){socket.emit("game:start",r=>{if(r&&!r.ok)msg(r.error,"err")})}
+socket.on("game:start",d=>{categories=d.categories;show("game");$("letter").textContent=d.letter;buildFields();runTimer(d.deadline);});
+function buildFields(){ $("fields").innerHTML=categories.map(c=>`<div><label>${c}</label><input id="f-${c}" autocomplete="off"></div>`).join("")}
+let interval;function runTimer(deadline){clearInterval(interval);function tick(){let s=Math.max(0,Math.ceil((deadline-Date.now())/1000));$("timer").textContent=s+" s";if(s<=0)clearInterval(interval)}tick();interval=setInterval(tick,250)}
+function stop(){socket.emit("game:stop")}
+socket.on("game:stopped",()=>{$("timer").textContent="STOP";$("progress").textContent="Ronda detenida. Entregá tus respuestas."})
+function submit(){const a={};categories.forEach(c=>a[c]=$("f-"+c).value);socket.emit("answers:submit",a,r=>{if(r?.ok){$("progress").className="ok";$("progress").textContent="¡Respuestas entregadas! Esperando a los demás…"}else if(r)msg(r.error,"err")})}
+socket.on("answers:progress",d=>{$("progress").textContent=`Respuestas entregadas: ${d.submitted}/${d.total}`})
+socket.on("game:results",d=>{clearInterval(interval);show("results");$("resultsList").innerHTML=d.results.map((r,i)=>`<div class="result"><b>${i+1}. ${r.name}</b><br>${Object.entries(r.answers).map(([k,v])=>`${k}: ${v||"—"}`).join(" · ")}<br><b>+${r.round} / total ${r.score}</b></div>`).join("");$("nextBtn").style.display=isHost?"block":"none"})
+function nextRound(){socket.emit("game:next")}
+</script></body></html>
